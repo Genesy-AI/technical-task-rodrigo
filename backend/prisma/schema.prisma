@@ -22,4 +22,8 @@ model lead {
   phoneNumber    String?
   yearsAtCompany Int?
   linkedinUrl    String?
+  // pending | running | found | not_found | failed, written by enrichPhoneWorkflow
+  phoneEnrichmentStatus   String?
+  // Provider being tried while running, or the one that found the phone
+  phoneEnrichmentProvider String?
 }
