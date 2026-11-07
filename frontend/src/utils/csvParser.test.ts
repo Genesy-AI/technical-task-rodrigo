@@ -66,6 +66,7 @@ John,Doe,john.doe@example.com,Developer,US,Tech Corp`
       companyName: 'Tech Corp',
       isValid: true,
       errors: [],
+      warnings: [],
       rowIndex: 2,
     })
   })
@@ -152,6 +153,40 @@ John,Doe,john@example.com,,`
     expect(result[0].jobTitle).toBeUndefined()
     expect(result[0].countryCode).toBeUndefined()
     expect(result[0].isValid).toBe(true)
+  })
+
+  describe('countryCode', () => {
+    const parseCountry = (countryCode: string) =>
+      parseCsv(`firstName,lastName,email,countryCode\nJohn,Doe,john@example.com,"${countryCode}"`)[0]
+
+    it.each([
+      ['us', 'US'],
+      [' gb ', 'GB'],
+      ['Es', 'ES'],
+      ['UK', 'GB'],
+      ['usa', 'US'],
+    ])('normalizes %j to %s', (input, expected) => {
+      const lead = parseCountry(input)
+      expect(lead.countryCode).toBe(expected)
+      expect(lead.warnings).toEqual([])
+    })
+
+    it.each(['XXX', '12', 'ZZ', 'EU', 'U S'])(
+      'drops invalid %j but keeps the lead valid with a warning',
+      (input) => {
+        const lead = parseCountry(input)
+        expect(lead.countryCode).toBeUndefined()
+        expect(lead.isValid).toBe(true)
+        expect(lead.errors).toEqual([])
+        expect(lead.warnings).toEqual([`Unknown country code "${input}", imported without country`])
+      }
+    )
+
+    it('treats an empty value as no country without a warning', () => {
+      const lead = parseCountry('')
+      expect(lead.countryCode).toBeUndefined()
+      expect(lead.warnings).toEqual([])
+    })
   })
 
   it('should preserve row index correctly', () => {
