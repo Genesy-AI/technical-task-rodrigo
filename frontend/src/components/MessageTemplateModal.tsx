@@ -1,14 +1,18 @@
-import { FC, useState, useEffect, useCallback, useRef } from 'react'
+import { FC, useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { api } from '../api'
+import { LeadsGetManyOutput } from '../api/types/leads/getMany'
+import { isMissingValue, renderPreview, templateFieldKeys } from '../utils/template'
+import { FieldPicker } from './FieldPicker'
 
 interface MessageTemplateModalProps {
   isOpen: boolean
   onClose: () => void
   selectedLeadIds: number[]
   selectedLeadsCount: number
+  selectedLeadsData: LeadsGetManyOutput
 }
 
 export const MessageTemplateModal: FC<MessageTemplateModalProps> = ({
@@ -16,6 +20,7 @@ export const MessageTemplateModal: FC<MessageTemplateModalProps> = ({
   onClose,
   selectedLeadIds,
   selectedLeadsCount,
+  selectedLeadsData,
 }) => {
   const [template, setTemplate] = useState('')
   const [generationResult, setGenerationResult] = useState<{
@@ -106,7 +111,31 @@ export const MessageTemplateModal: FC<MessageTemplateModalProps> = ({
     }
   }, [isOpen, handleClose])
 
-  const availableFields = ['firstName', 'lastName', 'email', 'jobTitle', 'companyName', 'countryCode']
+  const fieldsQuery = useQuery({
+    queryKey: ['leads', 'fields'],
+    queryFn: async () => api.leads.getFields(),
+    staleTime: Infinity,
+    enabled: isOpen,
+  })
+  const fields = useMemo(() => fieldsQuery.data ?? [], [fieldsQuery.data])
+  const knownKeys = useMemo(() => new Set(fields.map((field) => field.key)), [fields])
+
+  const missingCounts = useMemo(
+    () =>
+      Object.fromEntries(
+        fields.map((field) => [
+          field.key,
+          selectedLeadsData.filter((lead) => isMissingValue((lead as Record<string, unknown>)[field.key]))
+            .length,
+        ])
+      ),
+    [fields, selectedLeadsData]
+  )
+
+  const usedKeys = templateFieldKeys(template)
+  const unknownKeys = fieldsQuery.isSuccess ? usedKeys.filter((key) => !knownKeys.has(key)) : []
+  const missingUsedKeys = usedKeys.filter((key) => missingCounts[key] > 0)
+  const previewLead = selectedLeadsData[0]
 
   const insertField = (field: string) => {
     if (textareaRef.current) {
@@ -156,19 +185,18 @@ export const MessageTemplateModal: FC<MessageTemplateModalProps> = ({
                 Message Template
               </label>
               <div className="space-y-3">
-                <div className="flex flex-wrap gap-2">
-                  <span className="text-sm text-gray-600">Insert field:</span>
-                  {availableFields.map((field) => (
-                    <button
-                      key={field}
-                      type="button"
-                      onClick={() => insertField(field)}
-                      className="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded hover:bg-blue-200 transition-colors"
-                    >
-                      {`{${field}}`}
-                    </button>
-                  ))}
-                </div>
+                {fieldsQuery.isError ? (
+                  <p className="text-sm text-red-600">
+                    Couldn't load fields. You can still type {`{fieldName}`}.
+                  </p>
+                ) : (
+                  <FieldPicker
+                    fields={fields}
+                    missingCounts={missingCounts}
+                    selectedCount={selectedLeadsData.length}
+                    onInsert={insertField}
+                  />
+                )}
                 <textarea
                   ref={textareaRef}
                   id="message-template"
@@ -184,6 +212,33 @@ export const MessageTemplateModal: FC<MessageTemplateModalProps> = ({
                 field is missing for a lead, an error will be shown and no message will be generated for that
                 lead.
               </p>
+
+              {(unknownKeys.length > 0 || missingUsedKeys.length > 0) && (
+                <div className="mt-3 bg-amber-50 border border-amber-200 rounded-md p-3 text-sm text-amber-800 space-y-1">
+                  {unknownKeys.map((key) => (
+                    <div key={key}>
+                      Unknown field <code>{`{${key}}`}</code>: every lead will fail.
+                    </div>
+                  ))}
+                  {missingUsedKeys.map((key) => (
+                    <div key={key}>
+                      <code>{`{${key}}`}</code> is empty for {missingCounts[key]} of{' '}
+                      {selectedLeadsData.length} selected leads. They will be skipped.
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {template.trim() && previewLead && (
+                <div className="mt-3">
+                  <div className="text-sm font-medium text-gray-700 mb-1">
+                    Preview for {previewLead.firstName} {previewLead.lastName || ''}
+                  </div>
+                  <div className="bg-gray-50 border border-gray-200 rounded-md p-3 text-sm text-gray-800 whitespace-pre-wrap break-words">
+                    {renderPreview(template, previewLead, knownKeys)}
+                  </div>
+                </div>
+              )}
             </div>
 
             {generationResult && (

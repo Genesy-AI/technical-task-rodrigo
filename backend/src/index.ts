@@ -3,6 +3,7 @@ import express, { Request, Response } from 'express'
 import { Connection, Client } from '@temporalio/client'
 import { verifyEmailWorkflow } from './workflows'
 import { generateMessageFromTemplate } from './utils/messageGenerator'
+import { TEMPLATE_FIELDS, optionalText, parseLinkedinUrl, parseYearsAtCompany } from './utils/leadFields'
 import { runTemporalWorker } from './worker'
 const prisma = new PrismaClient()
 const app = express()
@@ -36,6 +37,11 @@ app.post('/leads', async (req: Request, res: Response) => {
     },
   })
   res.json(lead)
+})
+
+// Must stay above /leads/:id
+app.get('/leads/fields', (req: Request, res: Response) => {
+  res.json(TEMPLATE_FIELDS)
 })
 
 app.get('/leads/:id', async (req: Request, res: Response) => {
@@ -229,6 +235,10 @@ app.post('/leads/bulk', async (req: Request, res: Response) => {
             jobTitle: lead.jobTitle ? lead.jobTitle.trim() : null,
             countryCode: lead.countryCode ? lead.countryCode.trim() : null,
             companyName: lead.companyName ? lead.companyName.trim() : null,
+            // Invalid optional values are dropped (null), the lead is still imported
+            phoneNumber: optionalText(lead.phoneNumber),
+            yearsAtCompany: parseYearsAtCompany(lead.yearsAtCompany),
+            linkedinUrl: parseLinkedinUrl(lead.linkedinUrl),
           },
         })
         importedCount++

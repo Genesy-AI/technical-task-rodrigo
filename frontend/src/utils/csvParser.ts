@@ -7,9 +7,29 @@ export interface CsvLead {
   jobTitle?: string
   countryCode?: string
   companyName?: string
+  phoneNumber?: string
+  yearsAtCompany?: number
+  linkedinUrl?: string
   isValid: boolean
   errors: string[]
+  // Bad optional values: the field is dropped but the lead still imports
+  warnings: string[]
   rowIndex: number
+}
+
+// Mirrors parseYearsAtCompany / parseLinkedinUrl in backend/src/utils/leadFields.ts (the backend re-validates)
+export const parseYearsAtCompany = (value: string): number | undefined =>
+  /^\d{1,3}$/.test(value) && Number(value) <= 100 ? Number(value) : undefined
+
+export const parseLinkedinUrl = (value: string): string | undefined => {
+  try {
+    const url = new URL(/^[a-z][a-z\d+.-]*:/i.test(value) ? value : `https://${value}`)
+    const isHttp = url.protocol === 'https:' || url.protocol === 'http:'
+    const isLinkedin = url.hostname === 'linkedin.com' || url.hostname.endsWith('.linkedin.com')
+    return isHttp && isLinkedin ? url.href : undefined
+  } catch {
+    return undefined
+  }
 }
 
 export const isValidEmail = (email: string): boolean => {
@@ -49,6 +69,7 @@ export const parseCsv = (content: string): CsvLead[] => {
     if (Object.values(row).every((value) => !value)) return
 
     const lead: Partial<CsvLead> = { rowIndex: index + 2 }
+    const warnings: string[] = []
 
     Object.entries(row).forEach(([header, value]) => {
       const normalizedHeader = header.toLowerCase().replace(/[^a-z]/g, '')
@@ -73,6 +94,35 @@ export const parseCsv = (content: string): CsvLead[] => {
         case 'companyname':
           lead.companyName = trimmedValue || undefined
           break
+        case 'phonenumber':
+        case 'phone':
+        case 'mobile':
+        case 'mobilenumber':
+        case 'telephone':
+          lead.phoneNumber = trimmedValue || undefined
+          break
+        // yearsInRole is what the sample CSVs in docs/ use
+        case 'yearsatcompany':
+        case 'yearsatcurrentcompany':
+        case 'yearsincompany':
+        case 'tenure':
+        case 'yearsinrole':
+          if (!trimmedValue) break
+          lead.yearsAtCompany = parseYearsAtCompany(trimmedValue)
+          if (lead.yearsAtCompany === undefined) {
+            warnings.push(`Years at company "${trimmedValue}" is not a whole number 0-100, ignored`)
+          }
+          break
+        case 'linkedin':
+        case 'linkedinurl':
+        case 'linkedinprofile':
+        case 'linkedinprofileurl':
+          if (!trimmedValue) break
+          lead.linkedinUrl = parseLinkedinUrl(trimmedValue)
+          if (lead.linkedinUrl === undefined) {
+            warnings.push(`LinkedIn URL "${trimmedValue}" is not a linkedin.com link, ignored`)
+          }
+          break
       }
     })
 
@@ -96,6 +146,7 @@ export const parseCsv = (content: string): CsvLead[] => {
       email: lead.email || '',
       isValid: errors.length === 0,
       errors,
+      warnings,
     } as CsvLead)
   })
 
