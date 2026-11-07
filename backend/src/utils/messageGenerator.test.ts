@@ -184,6 +184,52 @@ describe('generateMessageFromTemplate', () => {
     })
   })
 
+  describe('new lead fields', () => {
+    const newFieldsLead: Lead = {
+      firstName: 'Ana',
+      phoneNumber: '005-190-0118',
+      yearsAtCompany: 7,
+      linkedinUrl: 'https://www.linkedin.com/in/ana',
+    }
+
+    it('should substitute phone, years and LinkedIn', () => {
+      const template = '{firstName}: {phoneNumber}, {yearsAtCompany} years, {linkedinUrl}'
+      expect(generateMessageFromTemplate(template, newFieldsLead)).toBe(
+        'Ana: 005-190-0118, 7 years, https://www.linkedin.com/in/ana'
+      )
+    })
+
+    it('should treat 0 years as a real value', () => {
+      expect(generateMessageFromTemplate('{yearsAtCompany}', { firstName: 'A', yearsAtCompany: 0 })).toBe('0')
+    })
+
+    it('should throw when years is null', () => {
+      expect(() =>
+        generateMessageFromTemplate('{yearsAtCompany}', { firstName: 'A', yearsAtCompany: null })
+      ).toThrow('Missing required field: yearsAtCompany')
+    })
+  })
+
+  describe('substitution safety', () => {
+    it('should insert values containing $ replacement patterns literally', () => {
+      const lead: Lead = { firstName: "$& $1 $$ $` $'" }
+      expect(generateMessageFromTemplate('Hi {firstName}!', lead)).toBe("Hi $& $1 $$ $` $'!")
+    })
+
+    it('should not re-substitute placeholders found inside values', () => {
+      const lead: Lead = { firstName: '{email}', email: 'leak@example.com' }
+      expect(generateMessageFromTemplate('{firstName} / {email}', lead)).toBe('{email} / leak@example.com')
+    })
+
+    it('should reject Object prototype keys as unknown fields', () => {
+      for (const key of ['constructor', 'toString', 'hasOwnProperty', '__proto__']) {
+        expect(() => generateMessageFromTemplate(`{${key}}`, fullLead)).toThrow(
+          `Unknown field in template: ${key}`
+        )
+      }
+    })
+  })
+
   describe('special characters and encoding', () => {
     it('should handle special characters in field values', () => {
       const specialLead: Lead = {

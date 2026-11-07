@@ -66,8 +66,55 @@ John,Doe,john.doe@example.com,Developer,US,Tech Corp`
       companyName: 'Tech Corp',
       isValid: true,
       errors: [],
+      warnings: [],
       rowIndex: 2,
     })
+  })
+
+  it('should parse the sample-file headers, mapping yearsInRole to yearsAtCompany', () => {
+    const csv = `firstName,lastName,email,jobTitle,countryCode,companyName,yearsInRole,phoneNumber
+Leslie,Andrews,ikemp@hotmail.com,Tourism officer,SC,Creative Visionaries,15,005-190-0118`
+
+    const [lead] = parseCsv(csv)
+
+    expect(lead.yearsAtCompany).toBe(15)
+    expect(lead.phoneNumber).toBe('005-190-0118')
+    expect(lead.isValid).toBe(true)
+  })
+
+  it('should accept common header spellings for the new fields', () => {
+    const csv = `First Name,Last Name,Email,Phone,Years at Company,LinkedIn Profile URL
+John,Doe,john@example.com,(731)123-9702,3,linkedin.com/in/john`
+
+    const [lead] = parseCsv(csv)
+
+    expect(lead.phoneNumber).toBe('(731)123-9702')
+    expect(lead.yearsAtCompany).toBe(3)
+    expect(lead.linkedinUrl).toBe('https://linkedin.com/in/john')
+  })
+
+  it('should keep 0 years and leave blank years undefined', () => {
+    const csv = `firstName,lastName,email,yearsAtCompany
+John,Doe,john@example.com,0
+Jane,Doe,jane@example.com,`
+
+    const [zero, blank] = parseCsv(csv)
+
+    expect(zero.yearsAtCompany).toBe(0)
+    expect(blank.yearsAtCompany).toBeUndefined()
+    expect(blank.warnings).toEqual([])
+  })
+
+  it('should drop invalid optional values with a warning but keep the lead valid', () => {
+    const csv = `firstName,lastName,email,yearsAtCompany,linkedinUrl
+John,Doe,john@example.com,2.5,javascript:alert(1)`
+
+    const [lead] = parseCsv(csv)
+
+    expect(lead.isValid).toBe(true)
+    expect(lead.yearsAtCompany).toBeUndefined()
+    expect(lead.linkedinUrl).toBeUndefined()
+    expect(lead.warnings).toHaveLength(2)
   })
 
   it('should handle missing required fields and mark as invalid', () => {
