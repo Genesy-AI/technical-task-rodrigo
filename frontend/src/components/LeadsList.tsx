@@ -4,6 +4,48 @@ import toast from 'react-hot-toast'
 import { api } from '../api'
 import { MessageTemplateModal } from './MessageTemplateModal'
 import { CsvImportModal } from './CsvImportModal'
+import { LeadsGetManyOutput } from '../api/types/leads/getMany'
+
+type Lead = LeadsGetManyOutput[number]
+
+const PHONE_PROVIDER_LABELS: Record<string, string> = {
+  orionConnect: 'Orion Connect',
+  astraDialer: 'Astra Dialer',
+  nimbusLookup: 'Nimbus Lookup',
+}
+
+const isPhoneEnrichmentInProgress = (lead: Lead) =>
+  lead.phoneEnrichmentStatus === 'pending' || lead.phoneEnrichmentStatus === 'running'
+
+const PhoneCell: FC<{ lead: Lead }> = ({ lead }) => {
+  if (isPhoneEnrichmentInProgress(lead)) {
+    const provider = lead.phoneEnrichmentProvider && PHONE_PROVIDER_LABELS[lead.phoneEnrichmentProvider]
+    return (
+      <div className="flex items-center text-sm text-gray-500" role="status">
+        <svg className="animate-spin mr-2 h-4 w-4 text-blue-600" aria-hidden="true" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+        </svg>
+        {provider ? `Trying ${provider}…` : 'Queued…'}
+      </div>
+    )
+  }
+  if (lead.phoneEnrichmentStatus === 'not_found') {
+    return <div className="text-sm text-gray-500 italic">No data found</div>
+  }
+  if (lead.phoneEnrichmentStatus === 'failed') {
+    return <div className="text-sm text-red-600">Lookup failed</div>
+  }
+  const source =
+    lead.phoneEnrichmentStatus === 'found' && lead.phoneEnrichmentProvider
+      ? `Found by ${PHONE_PROVIDER_LABELS[lead.phoneEnrichmentProvider] ?? lead.phoneEnrichmentProvider}`
+      : undefined
+  return (
+    <div className="text-sm text-gray-900" title={source}>
+      {lead.phoneNumber || '-'}
+    </div>
+  )
+}
 
 export const LeadsList: FC = () => {
   const [selectedLeads, setSelectedLeads] = useState<number[]>([])
@@ -16,6 +58,8 @@ export const LeadsList: FC = () => {
     queryKey: ['leads', 'getMany'],
     queryFn: async () => api.leads.getMany(),
     retry: false,
+    // Phone enrichment runs in the background, poll until every lead has a final status
+    refetchInterval: (query) => (query.state.data?.some(isPhoneEnrichmentInProgress) ? 2000 : false),
   })
   
 
@@ -48,6 +92,27 @@ export const LeadsList: FC = () => {
     },
     onError: () => {
       toast.error('Failed to verify emails. Please try again.')
+    }
+  })
+
+  const enrichPhonesMutation = useMutation({
+    mutationFn: async (ids: number[]) => api.leads.enrichPhones({ leadIds: ids }),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['leads', 'getMany'] })
+      setIsEnrichDropdownOpen(false)
+      const count = (status: string) => data.results.filter((result) => result.status === status).length
+      const notes = [
+        count('already_running') && `${count('already_running')} already running`,
+        count('skipped') && `${count('skipped')} already have a phone`,
+        data.errors.length && `${data.errors.length} failed to start`,
+      ].filter(Boolean)
+      const summary = `Phone search started for ${data.startedCount} lead${data.startedCount === 1 ? '' : 's'}`
+      const message = notes.length ? `${summary} (${notes.join(', ')})` : summary
+      if (data.startedCount > 0) toast.success(message)
+      else toast.error(message)
+    },
+    onError: () => {
+      toast.error('Failed to start phone search. Please try again.')
     }
   })
 
@@ -159,6 +224,18 @@ export const LeadsList: FC = () => {
                       </div>
                     </button>
                     <button
+                      onClick={() => enrichPhonesMutation.mutate(selectedLeads)}
+                      disabled={enrichPhonesMutation.isPending}
+                      className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50 transition-colors"
+                    >
+                      <div className="flex items-center">
+                        <svg className="mr-3 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                        </svg>
+                        Find Phone
+                      </div>
+                    </button>
+                    <button
                       onClick={() => {
                         toast.error('Gender guessing feature is not yet implemented')
                         setIsEnrichDropdownOpen(false)
@@ -235,6 +312,15 @@ export const LeadsList: FC = () => {
                   Country
                 </th>
                 <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
+                  Phone
+                </th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
+                  Years at Co.
+                </th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
+                  LinkedIn
+                </th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
                   Message
                 </th>
                 <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
@@ -274,6 +360,28 @@ export const LeadsList: FC = () => {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm text-gray-900">{lead.countryCode || '-'}</div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <PhoneCell lead={lead} />
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm text-gray-900">{lead.yearsAtCompany ?? '-'}</div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    {/* Backend only stores http(s) linkedin.com URLs, so the href is safe */}
+                    {lead.linkedinUrl ? (
+                      <a
+                        href={lead.linkedinUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm text-blue-600 hover:underline"
+                        title={lead.linkedinUrl}
+                      >
+                        Profile
+                      </a>
+                    ) : (
+                      <div className="text-sm text-gray-900">-</div>
+                    )}
                   </td>
                   <td className="px-6 py-4">
                     <div className="text-sm text-gray-900 max-w-xs truncate" title={lead.message || ''}>
@@ -323,6 +431,7 @@ export const LeadsList: FC = () => {
         onClose={() => setIsMessageModalOpen(false)}
         selectedLeadIds={selectedLeads}
         selectedLeadsCount={selectedLeads.length}
+        selectedLeadsData={leads.data?.filter((lead) => selectedLeads.includes(lead.id)) ?? []}
       />
 
       <CsvImportModal
